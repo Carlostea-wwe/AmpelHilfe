@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Ampel-Erkennung</title>
+  <title>Ampel-Erkennung mit Sprachausgabe</title>
   
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
@@ -81,6 +81,10 @@
     let isProcessing = false;
     let isStaticImage = false;
 
+    // Variablen für die Sprachsteuerung
+    let lastSpokenState = "";
+    let lastSpeechTime = 0;
+
     function resetCanvas() {
       canvas.width = 600;
       canvas.height = 400;
@@ -96,6 +100,24 @@
     cocoSsd.load().then(loadedModel => {
       model = loadedModel;
     }).catch(err => console.log("KI nicht geladen, nutze Licht-Fallback"));
+
+    // Akustische Sprachausgabe via Web Speech API
+    function speak(text) {
+      if ('speechSynthesis' in window) {
+        const now = Date.now();
+        // Sprechen, wenn sich der Zustand geändert hat ODER mehr als 3 Sekunden vergangen sind
+        if (text !== lastSpokenState || (now - lastSpeechTime) > 3000) {
+          window.speechSynthesis.cancel(); // Vorherige Durchsage abbrechen
+          const utterance = new SpeechSynthesisUtterance(text);
+          utterance.lang = 'de-DE';
+          utterance.rate = 1.0;
+          window.speechSynthesis.speak(utterance);
+          
+          lastSpokenState = text;
+          lastSpeechTime = now;
+        }
+      }
+    }
 
     function rgbToHsv(r, g, b) {
       r /= 255; g /= 255; b /= 255;
@@ -116,7 +138,6 @@
       return [h * 360, s * 100, v * 100];
     }
 
-    // Farbanalyse innerhalb der Bounding Box (ROI)
     function analyzeColorInRoi(ctx, x, y, w, h) {
       const rx = Math.max(0, Math.round(x));
       const ry = Math.max(0, Math.round(y));
@@ -130,10 +151,7 @@
 
       for (let i = 0; i < data.length; i += 4) {
         const [hue, sat, val] = rgbToHsv(data[i], data[i + 1], data[i + 2]);
-        
-        // Signal-Grün (Leuchtend)
         if (hue >= 115 && hue <= 175 && sat >= 25 && val >= 40) greenCount++;
-        // Signal-Rot (Hohe Helligkeit, um Schilder zu vermeiden)
         if ((hue <= 10 || hue >= 345) && sat >= 55 && val >= 60) redCount++;
       }
 
@@ -142,7 +160,6 @@
       return 'unknown';
     }
 
-    // Präzise Leuchtfleck-Suche für kompakte Ampelpunkte (Filtert Straßenschilder & Kleidung raus)
     function compactLightSpotSearch(width, height) {
       const imgData = ctx.getImageData(0, 0, width, height);
       const data = imgData.data;
@@ -155,7 +172,6 @@
           const i = (y * width + x) * 4;
           const [h, s, v] = rgbToHsv(data[i], data[i + 1], data[i + 2]);
 
-          // Nur leuchtende LED-Pixel akzeptieren (High Brightness/Saturation)
           if (h >= 115 && h <= 175 && s >= 30 && v >= 60) {
             greenPixels.push({x, y});
           }
@@ -165,7 +181,6 @@
         }
       }
 
-      // Prüfe auf kompaktes Grün-Cluster
       if (greenPixels.length >= 3) {
         const box = getBoundingBoxFromPixels(greenPixels, width, height);
         if (box && box.w < (width * 0.15) && box.h < (height * 0.25)) {
@@ -173,7 +188,6 @@
         }
       }
 
-      // Prüfe auf kompaktes Rot-Cluster
       if (redPixels.length >= 3) {
         const box = getBoundingBoxFromPixels(redPixels, width, height);
         if (box && box.w < (width * 0.12) && box.h < (height * 0.20)) {
@@ -211,7 +225,6 @@
       try {
         let detected = false;
 
-        // 1. KI-Objekterkennung (Niedriger Schwellenwert 0.05 für seitliche Ampeln wie auf Bild 2)
         if (model) {
           const predictions = await model.detect(canvas);
           const candidates = predictions.filter(p => (p.class === 'traffic light' || p.class === 'stop sign') && p.score > 0.05);
@@ -228,7 +241,6 @@
           }
         }
 
-        // 2. Kompakter Leuchtfleck-Fallback (für verdeckte Signale & Nacht)
         if (!detected) {
           const fallback = compactLightSpotSearch(canvas.width, canvas.height);
           if (fallback.found) {
@@ -240,6 +252,7 @@
         if (!detected) {
           statusDiv.innerText = "Keine Ampel erkannt.";
           statusDiv.style.borderColor = "#dc3545";
+          // Kein Aufruf von speak() bei "Keine Ampel", um die Audioausgabe nicht zu überfluten
         }
 
       } catch (err) {
@@ -257,6 +270,13 @@
 
       statusDiv.innerText = `${colorName} Ampel erkannt!${scoreText}`;
       statusDiv.style.borderColor = strokeColor;
+
+      // Akustische Ansage auslösen
+      if (color === 'green') {
+        speak("Grüne Ampel erkannt");
+      } else if (color === 'red') {
+        speak("Rote Ampel erkannt");
+      }
 
       ctx.strokeStyle = strokeColor;
       ctx.lineWidth = Math.max(3, Math.round(canvas.width / 200));
