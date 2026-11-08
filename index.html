@@ -96,17 +96,17 @@
       return [h * 360, s * 100, v * 100];
     }
 
-    // 2. HSV-Analyse auf dem Canvas
+    // 2. HSV-Analyse (Optimiert für kleine Signale auf Distanz)
     function detectGreenLightRegion(ctx, width, height) {
       const imgData = ctx.getImageData(0, 0, width, height);
       const data = imgData.data;
 
       let minX = width, maxX = 0, minY = height, maxY = 0;
       let greenPixelCount = 0;
-      const step = 4; // Schrittweite 4 für flüssigen Kamera-Stream
 
-      for (let y = 0; y < height; y += step) {
-        for (let x = 0; x < width; x += step) {
+      // step = 1: Jedes Pixel prüfen, um auch entfernte Mini-Ampeln zu erwischen
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
           const i = (y * width + x) * 4;
           const r = data[i];
           const g = data[i + 1];
@@ -114,8 +114,10 @@
 
           const [h, s, v] = rgbToHsv(r, g, b);
 
-          // Grün-Bereich für Ampel-LEDs (140° - 175°)
-          if (h >= 140 && h <= 175 && s >= 40 && v >= 50) {
+          // Erweiterter Grün-Filter:
+          // Hue: 115° bis 170° (deckt auch gelblicheres/bläulicheres Grün ab)
+          // Sättigung: > 35%, Helligkeit: > 45%
+          if (h >= 115 && h <= 170 && s >= 35 && v >= 45) {
             greenPixelCount++;
             if (x < minX) minX = x;
             if (x > maxX) maxX = x;
@@ -125,7 +127,8 @@
         }
       }
 
-      const hasGreenLight = greenPixelCount > 10;
+      // Schwelle auf 5 Pixel gesenkt für Distanzaufnahmen
+      const hasGreenLight = greenPixelCount >= 5;
 
       return {
         found: hasGreenLight,
@@ -139,7 +142,7 @@
       };
     }
 
-    // 3. Auswertung und Visuelle Markierung
+    // 3. Auswertung und Zeichnen
     function processFrame() {
       const result = detectGreenLightRegion(ctx, canvas.width, canvas.height);
 
@@ -149,15 +152,22 @@
         
         const box = result.boundingBox;
         ctx.strokeStyle = '#00FF00';
-        ctx.lineWidth = Math.max(3, Math.round(canvas.width / 200));
-        ctx.strokeRect(box.x, box.y, box.width, box.height);
+        ctx.lineWidth = 4;
+        // Bounding Box mit etwas Padding zeichnen
+        const padding = 10;
+        ctx.strokeRect(
+          Math.max(0, box.x - padding), 
+          Math.max(0, box.y - padding), 
+          box.width + (padding * 2), 
+          box.height + (padding * 2)
+        );
       } else {
-        statusDiv.innerText = "Suche nach Ampel...";
-        statusDiv.style.borderColor = "#444";
+        statusDiv.innerText = "Kein grünes Signal erkannt.";
+        statusDiv.style.borderColor = "#dc3545";
       }
     }
 
-    // 4. Live-Kamera initialisieren
+    // 4. Kamera-Stream
     async function startCamera() {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
@@ -184,7 +194,7 @@
       requestAnimationFrame(renderLoop);
     }
 
-    // 5. Datei-Upload verarbeiten
+    // 5. Datei-Upload (Skaliert übergroße Bilder herunter)
     imageLoader.addEventListener('change', function(e) {
       const file = e.target.files[0];
       if (!file) return;
@@ -193,10 +203,26 @@
       reader.onload = function(event) {
         const img = new Image();
         img.onload = function() {
-          isStaticImage = true; // Stoppt den Live-Stream-Overwriting
-          canvas.width = img.width;
-          canvas.height = img.height;
-          ctx.drawImage(img, 0, 0);
+          isStaticImage = true;
+          
+          // Max-Breite auf 800px begrenzen, damit Distanz-Signale nicht in Megapixeln untergehen
+          const maxDim = 800;
+          let w = img.width;
+          let h = img.height;
+
+          if (w > maxDim || h > maxDim) {
+            if (w > h) {
+              h = Math.round((h * maxDim) / w);
+              w = maxDim;
+            } else {
+              w = Math.round((w * maxDim) / h);
+              h = maxDim;
+            }
+          }
+
+          canvas.width = w;
+          canvas.height = h;
+          ctx.drawImage(img, 0, 0, w, h);
           processFrame();
         };
         img.src = event.target.result;
