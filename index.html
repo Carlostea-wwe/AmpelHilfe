@@ -30,7 +30,8 @@
     }
     canvas {
       width: 100%;
-      height: 350px;
+      max-height: 70vh;
+      object-fit: contain;
       background-color: #1a1a1a;
       border-radius: 8px;
       border: 1px solid #333;
@@ -50,18 +51,20 @@
       width: 100%;
       max-width: 600px;
     }
+    video { display: none; }
   </style>
 </head>
 <body>
 
-  <div id="status">Suche nach Ampel...</div>
+  <div id="status">Starte Kamera...</div>
   
   <div class="canvas-container">
     <canvas id="outputCanvas"></canvas>
   </div>
   
-  <!-- Breiterer Dateityp-Filter gegen Ladeblockaden auf Mobilgeräten -->
-  <input type="file" id="imageLoader" accept="image/jpeg,image/png,image/webp,image/*" style="display: none;">
+  <video id="webcam" autoplay playsinline></video>
+  
+  <input type="file" id="imageLoader" accept="image/*" style="display: none;">
   <button class="btn" onclick="document.getElementById('imageLoader').click();">📷 Eigene Testbilder testen (JPG)</button>
 
   <script>
@@ -69,19 +72,9 @@
     const ctx = canvas.getContext('2d');
     const statusDiv = document.getElementById('status');
     const imageLoader = document.getElementById('imageLoader');
+    const video = document.getElementById('webcam');
 
-    // Canvas-Vorschaufeld beim ersten Aufruf zeichnen
-    function initCanvas() {
-      canvas.width = 600;
-      canvas.height = 400;
-      ctx.fillStyle = '#1a1a1a';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = '#888888';
-      ctx.font = '20px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('Kein Bild geladen', canvas.width / 2, canvas.height / 2);
-    }
-    initCanvas();
+    let isStaticImage = false;
 
     // 1. RGB zu HSV Konvertierung
     function rgbToHsv(r, g, b) {
@@ -103,14 +96,14 @@
       return [h * 360, s * 100, v * 100];
     }
 
-    // 2. HSV-Analyse
+    // 2. HSV-Analyse auf dem Canvas
     function detectGreenLightRegion(ctx, width, height) {
       const imgData = ctx.getImageData(0, 0, width, height);
       const data = imgData.data;
 
       let minX = width, maxX = 0, minY = height, maxY = 0;
       let greenPixelCount = 0;
-      const step = 2; 
+      const step = 4; // Schrittweite 4 für flüssigen Kamera-Stream
 
       for (let y = 0; y < height; y += step) {
         for (let x = 0; x < width; x += step) {
@@ -121,6 +114,7 @@
 
           const [h, s, v] = rgbToHsv(r, g, b);
 
+          // Grün-Bereich für Ampel-LEDs (140° - 175°)
           if (h >= 140 && h <= 175 && s >= 40 && v >= 50) {
             greenPixelCount++;
             if (x < minX) minX = x;
@@ -131,7 +125,7 @@
         }
       }
 
-      const hasGreenLight = greenPixelCount > 15;
+      const hasGreenLight = greenPixelCount > 10;
 
       return {
         found: hasGreenLight,
@@ -145,7 +139,52 @@
       };
     }
 
-    // 3. Bild-Upload und Verarbeitung
+    // 3. Auswertung und Visuelle Markierung
+    function processFrame() {
+      const result = detectGreenLightRegion(ctx, canvas.width, canvas.height);
+
+      if (result.found) {
+        statusDiv.innerText = `Grünes Signal erkannt! (${result.pixelCount} Pixel)`;
+        statusDiv.style.borderColor = "#28a745";
+        
+        const box = result.boundingBox;
+        ctx.strokeStyle = '#00FF00';
+        ctx.lineWidth = Math.max(3, Math.round(canvas.width / 200));
+        ctx.strokeRect(box.x, box.y, box.width, box.height);
+      } else {
+        statusDiv.innerText = "Suche nach Ampel...";
+        statusDiv.style.borderColor = "#444";
+      }
+    }
+
+    // 4. Live-Kamera initialisieren
+    async function startCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: false
+        });
+        video.srcObject = stream;
+        video.onloadedmetadata = () => {
+          video.play();
+          renderLoop();
+        };
+      } catch (err) {
+        statusDiv.innerText = "Kamera nicht verfügbar. Bitte Testbild laden.";
+      }
+    }
+
+    function renderLoop() {
+      if (!isStaticImage && video.readyState === video.HAVE_ENOUGH_DATA) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        processFrame();
+      }
+      requestAnimationFrame(renderLoop);
+    }
+
+    // 5. Datei-Upload verarbeiten
     imageLoader.addEventListener('change', function(e) {
       const file = e.target.files[0];
       if (!file) return;
@@ -154,36 +193,18 @@
       reader.onload = function(event) {
         const img = new Image();
         img.onload = function() {
-          // Canvas auf Pixelgröße des geknipsten/ausgewählten Bildes setzen
+          isStaticImage = true; // Stoppt den Live-Stream-Overwriting
           canvas.width = img.width;
           canvas.height = img.height;
-          
-          // Höhe im CSS auf 'auto' stellen, damit das Bild nicht verzerrt wird
-          canvas.style.height = 'auto';
-
-          // Bild zeichnen
           ctx.drawImage(img, 0, 0);
-
-          // HSV-Analyse ausführen
-          const result = detectGreenLightRegion(ctx, canvas.width, canvas.height);
-
-          if (result.found) {
-            statusDiv.innerText = `Grünes Signal erkannt! (${result.pixelCount} Pixel)`;
-            statusDiv.style.borderColor = "#28a745";
-            
-            const box = result.boundingBox;
-            ctx.strokeStyle = '#00FF00';
-            ctx.lineWidth = Math.max(4, Math.round(canvas.width / 200));
-            ctx.strokeRect(box.x, box.y, box.width, box.height);
-          } else {
-            statusDiv.innerText = "Kein grünes Signal erkannt.";
-            statusDiv.style.borderColor = "#dc3545";
-          }
+          processFrame();
         };
         img.src = event.target.result;
       };
       reader.readAsDataURL(file);
     });
+
+    startCamera();
   </script>
 </body>
 </html>
