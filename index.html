@@ -105,7 +105,7 @@
     let softwareZoomFactor = 1.0;
     let isTestMode = false;
 
-    const FRAME_HISTORY_SIZE = 7;
+    const FRAME_HISTORY_SIZE = 5;
     let frameHistory = [];
     let currentAnnouncedState = "NONE";
 
@@ -130,7 +130,6 @@
     }
 
     function announceState(state) {
-      if (state === currentAnnouncedState) return;
       currentAnnouncedState = state;
 
       if (state === 'ROT') {
@@ -178,8 +177,8 @@
       }
     });
 
-    // Optimierte Farbanalyse gegen Auto-Rücklichter & für Cyan-Grün
-    function analyzeTrafficLightHSV(x, y, width, height) {
+    // Strikte Farbanalyse mit Höhenbegrenzung gegen Auto-Rücklichter
+    function analyzeTrafficLightHSV(x, y, width, height, isFullCanvas = false) {
       if (width <= 0 || height <= 0) return 'NONE';
 
       try {
@@ -191,6 +190,9 @@
         const midY = height / 2;
 
         for (let py = 0; py < height; py++) {
+          // Wenn auf dem gesamten Bild gescannt wird: Ignoriere untere Straßenzone (Autos)
+          if (isFullCanvas && py > height * 0.65) continue;
+
           for (let px = 0; px < width; px++) {
             const idx = (py * width + px) * 4;
             const r = data[idx] / 255;
@@ -213,22 +215,23 @@
 
             const hueDeg = h * 360;
 
-            // Rot-Filter: Nur in der oberen Hälfte der Bounding-Box zulassen
+            // Rot-Filter: Nur im oberen Teil einer Box oder im oberen Drittel des Canvas
             if (py < midY && (hueDeg <= 12 || hueDeg >= 345) && s > 0.45 && v > 0.4) {
               redCountTop++;
             }
-            // Grün-Filter: Breiterer Hue-Bereich (100° bis 185°) + niedrigere Sättigung für helles LED-Grün
-            if ((hueDeg >= 100 && hueDeg <= 185) && s > 0.15 && v > 0.35) {
+            // Grün-Filter: Sehr toleranter Hue-Bereich (95° bis 190°) für helles Cyan/Grün-LED
+            if ((hueDeg >= 95 && hueDeg <= 190) && s > 0.12 && v > 0.30) {
               greenCount++;
             }
           }
         }
 
         const totalPixels = width * height;
-        if (greenCount / totalPixels > 0.008) return 'GRUEN';
+        // GRÜN erhält Vorrang vor ROT bei Fußgängerampeln
+        if (greenCount / totalPixels > 0.005) return 'GRUEN';
         if (redCountTop / totalPixels > 0.015) return 'ROT';
       } catch (e) {
-        console.warn("Canvas ImageData konnte nicht ausgelesen werden:", e);
+        console.warn("Canvas ImageData-Fehler:", e);
       }
 
       return 'NONE';
@@ -256,15 +259,14 @@
         lastDetectionTime = now;
 
         try {
-          const predictions = await model.detect(canvas, 10, 0.12);
+          const predictions = await model.detect(canvas, 10, 0.10);
           let frameState = 'NONE';
 
           predictions.forEach(pred => {
             const [x, y, w, h] = pred.bbox;
-            const aspectRatio = h / w;
 
-            // Ignoriere flache Boxen in Straßenhöhe (Autos)
-            if (y < canvas.height * 0.7 && aspectRatio > 0.8) {
+            // Filtere Objekte aus, die zu tief auf der Straße liegen (Autos/Rücklichter)
+            if (y < canvas.height * 0.65) {
               const rx = Math.max(0, Math.floor(x));
               const ry = Math.max(0, Math.floor(y));
               const rw = Math.min(canvas.width - rx, Math.floor(w));
@@ -281,9 +283,9 @@
             }
           });
 
-          // Fallback: Scan der oberen/mittleren Bildbereiche
+          // Fallback-Scan: Durchsuche oberen/mittleren Bildbereich gezielt nach Grün
           if (frameState === 'NONE') {
-            frameState = analyzeTrafficLightHSV(0, 0, canvas.width, Math.floor(canvas.height * 0.85));
+            frameState = analyzeTrafficLightHSV(0, 0, canvas.width, Math.floor(canvas.height * 0.7), true);
           }
 
           frameHistory.push(frameState);
@@ -292,8 +294,8 @@
           const rotVotes = frameHistory.filter(s => s === 'ROT').length;
           const gruenVotes = frameHistory.filter(s => s === 'GRUEN').length;
 
-          if (gruenVotes >= 3) announceState('GRUEN');
-          else if (rotVotes >= 4) announceState('ROT');
+          if (gruenVotes >= 2) announceState('GRUEN');
+          else if (rotVotes >= 3) announceState('ROT');
           else if (frameHistory.every(s => s === 'NONE')) announceState('NONE');
 
         } catch (err) {
@@ -328,32 +330,37 @@
           statusCard.textContent = "Analysiere Testbild...";
           statusCard.className = "";
 
-          await new Promise(r => setTimeout(r, 100));
+          await new Promise(r => setTimeout(r, 80));
 
           if (model) {
             try {
-              const predictions = await model.detect(canvas, 10, 0.12);
+              const predictions = await model.detect(canvas, 10, 0.10);
               let detectedState = 'NONE';
 
               predictions.forEach(pred => {
                 const [x, y, w, h] = pred.bbox;
-                const rx = Math.max(0, Math.floor(x));
-                const ry = Math.max(0, Math.floor(y));
-                const rw = Math.min(canvas.width - rx, Math.floor(w));
-                const rh = Math.min(canvas.height - ry, Math.floor(h));
 
-                const state = analyzeTrafficLightHSV(rx, ry, rw, rh);
-                
-                if (state !== 'NONE') {
-                  detectedState = state;
-                  ctx.strokeStyle = state === 'ROT' ? '#ff3b30' : '#34c759';
-                  ctx.lineWidth = Math.max(4, Math.floor(canvas.width / 200));
-                  ctx.strokeRect(rx, ry, rw, rh);
+                // Ignoriere untere Bildbereiche (Autos)
+                if (y < canvas.height * 0.65) {
+                  const rx = Math.max(0, Math.floor(x));
+                  const ry = Math.max(0, Math.floor(y));
+                  const rw = Math.min(canvas.width - rx, Math.floor(w));
+                  const rh = Math.min(canvas.height - ry, Math.floor(h));
+
+                  const state = analyzeTrafficLightHSV(rx, ry, rw, rh);
+                  
+                  if (state !== 'NONE') {
+                    detectedState = state;
+                    ctx.strokeStyle = state === 'ROT' ? '#ff3b30' : '#34c759';
+                    ctx.lineWidth = Math.max(4, Math.floor(canvas.width / 200));
+                    ctx.strokeRect(rx, ry, rw, rh);
+                  }
                 }
               });
 
+              // Fallback für grüne Ampeln ohne KI-Bounding-Box
               if (detectedState === 'NONE') {
-                detectedState = analyzeTrafficLightHSV(0, 0, canvas.width, canvas.height);
+                detectedState = analyzeTrafficLightHSV(0, 0, canvas.width, Math.floor(canvas.height * 0.7), true);
               }
 
               announceState(detectedState);
