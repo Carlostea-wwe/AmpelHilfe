@@ -81,7 +81,6 @@
     let isProcessing = false;
     let isStaticImage = false;
 
-    // Initiales Canvas zeichnen damit es nie leer bleibt
     function resetCanvas() {
       canvas.width = 600;
       canvas.height = 400;
@@ -94,13 +93,9 @@
     }
     resetCanvas();
 
-    // KI-Modell laden (völlig unkritisch im Hintergrund)
     cocoSsd.load().then(loadedModel => {
       model = loadedModel;
-      console.log("KI-Modell bereit");
-    }).catch(err => {
-      console.log("KI nicht verfügbar, nutze Licht-Fallback");
-    });
+    }).catch(err => console.log("KI nicht geladen, nutze Licht-Fallback"));
 
     function rgbToHsv(r, g, b) {
       r /= 255; g /= 255; b /= 255;
@@ -121,6 +116,7 @@
       return [h * 360, s * 100, v * 100];
     }
 
+    // Farbanalyse im ROI mit vertikaler Gewichtung (oben Rot, unten Grün)
     function analyzeColorInRoi(ctx, x, y, w, h) {
       const rx = Math.max(0, Math.round(x));
       const ry = Math.max(0, Math.round(y));
@@ -134,8 +130,12 @@
 
       for (let i = 0; i < data.length; i += 4) {
         const [hue, sat, val] = rgbToHsv(data[i], data[i + 1], data[i + 2]);
-        if (hue >= 110 && hue <= 175 && sat >= 25 && val >= 40) greenCount++;
-        if ((hue <= 18 || hue >= 330) && sat >= 35 && val >= 40) redCount++;
+        
+        // Signal-Grün (Türkis/Smaragd bis Maigrün)
+        if (hue >= 115 && hue <= 175 && sat >= 25 && val >= 40) greenCount++;
+        
+        // Signal-Rot (Sehr hohe Helligkeit/Sättigung um Schilder auszufiltern)
+        if ((hue <= 12 || hue >= 340) && sat >= 50 && val >= 55) redCount++;
       }
 
       if (greenCount > redCount && greenCount >= 2) return 'green';
@@ -143,6 +143,7 @@
       return 'unknown';
     }
 
+    // Strengere Leuchtpunkt-Suche (Ignoriert Schilder und Kleidung)
     function lightSpotSearch(width, height) {
       const imgData = ctx.getImageData(0, 0, width, height);
       const data = imgData.data;
@@ -155,8 +156,9 @@
           const i = (y * width + x) * 4;
           const [h, s, v] = rgbToHsv(data[i], data[i + 1], data[i + 2]);
 
-          const isGreen = (h >= 115 && h <= 175 && s >= 30 && v >= 55);
-          const isRed = ((h <= 18 || h >= 335) && s >= 40 && v >= 55);
+          // Echte LED-Signale strahlen hell (v > 65%)
+          const isGreen = (h >= 115 && h <= 175 && s >= 35 && v >= 65);
+          const isRed = ((h <= 10 || h >= 345) && s >= 60 && v >= 70);
 
           if (isGreen || isRed) {
             if (isGreen) greenCount++;
@@ -173,15 +175,16 @@
       const boxW = maxX - minX;
       const boxH = maxY - minY;
 
-      if (total >= 3 && boxW > 0 && boxH > 0 && (boxW / boxH) < 2.5) {
+      // Filtert riesige Boxen aus (Schilder/Wände dürfen max 25% der Bildbreite sein)
+      if (total >= 3 && boxW > 0 && boxH > 0 && (boxW / boxH) < 2.0 && boxW < (width * 0.25)) {
         return {
           found: true,
           color: greenCount > redCount ? 'green' : 'red',
           bbox: [
-            Math.max(0, minX - 12), 
-            Math.max(0, minY - 12), 
-            Math.min(width, boxW + 24), 
-            Math.min(height, boxH + 24)
+            Math.max(0, minX - 10), 
+            Math.max(0, minY - 10), 
+            Math.min(width, boxW + 20), 
+            Math.min(height, boxH + 20)
           ]
         };
       }
@@ -195,9 +198,10 @@
       try {
         let detected = false;
 
+        // 1. Objekterkennung per KI-Modell (Sehr niedriger Schwellenwert 0.08 für schräge Ampeln)
         if (model) {
           const predictions = await model.detect(canvas);
-          const candidates = predictions.filter(p => (p.class === 'traffic light' || p.class === 'stop sign') && p.score > 0.10);
+          const candidates = predictions.filter(p => (p.class === 'traffic light' || p.class === 'stop sign') && p.score > 0.08);
 
           if (candidates.length > 0) {
             for (const cand of candidates) {
@@ -211,6 +215,7 @@
           }
         }
 
+        // 2. Präziser Fallback für Dunkelheit / verdeckte Signale
         if (!detected) {
           const fallback = lightSpotSearch(canvas.width, canvas.height);
           if (fallback.found) {
@@ -245,7 +250,6 @@
       ctx.strokeRect(x, y, w, h);
     }
 
-    // Direkter Event-Listener für den Bild-Upload
     imageLoader.addEventListener('change', function(e) {
       const file = e.target.files[0];
       if (!file) return;
@@ -285,7 +289,6 @@
       reader.readAsDataURL(file);
     });
 
-    // Kamera optional und abgesichert starten
     if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
       navigator.mediaDevices.getUserMedia({
         video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
