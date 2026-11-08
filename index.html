@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Ampelhilfe Pro – Barrierefreie Fußgängerampel-Erkennung</title>
   
-  <!-- TensorFlow.js & COCO-SSD Model -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.21.0/dist/tf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js"></script>
 
@@ -19,14 +18,10 @@
       --neutral-signal: #8e8e93;
     }
 
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       background-color: var(--bg-color);
       color: var(--text-main);
       display: flex;
@@ -36,134 +31,39 @@
       padding: 12px;
     }
 
-    header {
-      width: 100%;
-      max-width: 650px;
-      text-align: center;
-      margin-bottom: 12px;
-    }
-
-    h1 {
-      font-size: 1.8rem;
-      color: #fff;
-    }
-
-    .disclaimer {
-      font-size: 0.85rem;
-      color: #aaa;
-      margin-top: 4px;
-    }
+    header { width: 100%; max-width: 650px; text-align: center; margin-bottom: 12px; }
+    h1 { font-size: 1.8rem; color: #fff; }
+    .disclaimer { font-size: 0.85rem; color: #aaa; margin-top: 4px; }
 
     #status-card {
-      width: 100%;
-      max-width: 650px;
-      padding: 16px;
-      border-radius: 12px;
-      background-color: var(--card-bg);
-      text-align: center;
-      font-size: 1.5rem;
-      font-weight: bold;
-      margin-bottom: 12px;
-      border: 4px solid var(--neutral-signal);
+      width: 100%; max-width: 650px; padding: 16px; border-radius: 12px;
+      background-color: var(--card-bg); text-align: center; font-size: 1.5rem;
+      font-weight: bold; margin-bottom: 12px; border: 4px solid var(--neutral-signal);
       transition: background-color 0.2s, border-color 0.2s;
     }
 
-    #status-card.rot {
-      background-color: rgba(255, 59, 48, 0.25);
-      border-color: var(--red-signal);
-      color: var(--red-signal);
-    }
-
-    #status-card.gruen {
-      background-color: rgba(52, 199, 89, 0.25);
-      border-color: var(--green-signal);
-      color: var(--green-signal);
-    }
+    #status-card.rot { background-color: rgba(255, 59, 48, 0.25); border-color: var(--red-signal); color: var(--red-signal); }
+    #status-card.gruen { background-color: rgba(52, 199, 89, 0.25); border-color: var(--green-signal); color: var(--green-signal); }
 
     .viewport-container {
-      position: relative;
-      width: 100%;
-      max-width: 650px;
-      height: 65vh;
-      min-height: 400px;
-      background-color: #000;
-      border-radius: 16px;
-      overflow: hidden;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      border: 2px solid #333;
+      position: relative; width: 100%; max-width: 650px; height: 65vh; min-height: 400px;
+      background-color: #000; border-radius: 16px; overflow: hidden; display: flex;
+      justify-content: center; align-items: center; border: 2px solid #333;
     }
 
-    video, canvas {
-      position: absolute;
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-    }
+    video, canvas { position: absolute; width: 100%; height: 100%; object-fit: cover; }
+    canvas { z-index: 10; }
 
-    canvas {
-      z-index: 10;
-    }
+    .controls { width: 100%; max-width: 650px; margin-top: 12px; display: flex; flex-direction: column; gap: 12px; }
+    .control-group { background: var(--card-bg); padding: 12px 16px; border-radius: 10px; display: flex; align-items: center; justify-content: space-between; }
+    label { font-size: 1rem; font-weight: 600; }
+    input[type="range"] { width: 60%; height: 28px; }
 
-    .controls {
-      width: 100%;
-      max-width: 650px;
-      margin-top: 12px;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-    }
-
-    .control-group {
-      background: var(--card-bg);
-      padding: 12px 16px;
-      border-radius: 10px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-
-    label {
-      font-size: 1rem;
-      font-weight: 600;
-    }
-
-    input[type="range"] {
-      width: 60%;
-      height: 28px;
-    }
-
-    .btn {
-      background-color: #007aff;
-      color: white;
-      border: none;
-      padding: 14px;
-      font-size: 1.1rem;
-      font-weight: bold;
-      border-radius: 10px;
-      cursor: pointer;
-      width: 100%;
-      text-align: center;
-    }
-
-    .btn:active {
-      opacity: 0.8;
-    }
-
-    .file-input-wrapper {
-      position: relative;
-      width: 100%;
-    }
-
-    .file-input-wrapper input[type="file"] {
-      display: none;
-    }
-
-    .file-btn {
-      background-color: #34c759;
-      display: block;
-    }
+    .btn { background-color: #007aff; color: white; border: none; padding: 14px; font-size: 1.1rem; font-weight: bold; border-radius: 10px; cursor: pointer; width: 100%; text-align: center; }
+    .btn:active { opacity: 0.8; }
+    .file-input-wrapper { position: relative; width: 100%; }
+    .file-input-wrapper input[type="file"] { display: none; }
+    .file-btn { background-color: #34c759; display: block; }
   </style>
 </head>
 <body>
@@ -205,17 +105,14 @@
     let softwareZoomFactor = 1.0;
     let isTestMode = false;
 
-    // Entprellung (Majority Voting über 7 Frames)
     const FRAME_HISTORY_SIZE = 7;
     let frameHistory = [];
     let currentAnnouncedState = "NONE";
 
-    // Leistungsdrosselung für Live-Ansicht (alle 200 ms)
     let isProcessingFrame = false;
     let lastDetectionTime = 0;
     const DETECTION_INTERVAL_MS = 200;
 
-    // Web Audio API Synthesizer
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
     function playTone(freq, duration) {
@@ -252,7 +149,6 @@
       }
     }
 
-    // Live-Kamera starten
     async function initCamera() {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
@@ -261,7 +157,6 @@
         });
         videoElement.srcObject = stream;
         videoTrack = stream.getVideoTracks()[0];
-        
         videoElement.onloadedmetadata = () => {
           canvas.width = videoElement.videoWidth;
           canvas.height = videoElement.videoHeight;
@@ -272,24 +167,18 @@
       }
     }
 
-    // Hybrider Zoom
     zoomSlider.addEventListener('input', async (e) => {
       const zoomVal = parseFloat(e.target.value);
       softwareZoomFactor = zoomVal;
-
       if (videoTrack && typeof videoTrack.getCapabilities === 'function') {
         const caps = videoTrack.getCapabilities();
         if (caps.zoom) {
-          try {
-            await videoTrack.applyConstraints({ advanced: [{ zoom: zoomVal }] });
-          } catch (err) {
-            console.warn("Hardware-Zoom fehlgeschlagen, nutze Software-Zoom Canvas.");
-          }
+          try { await videoTrack.applyConstraints({ advanced: [{ zoom: zoomVal }] }); } catch (err) {}
         }
       }
     });
 
-    // Robuste HSV-Farbraumanalyse
+    // Optimierte Farbanalyse gegen Auto-Rücklichter & für Cyan-Grün
     function analyzeTrafficLightHSV(x, y, width, height) {
       if (width <= 0 || height <= 0) return 'NONE';
 
@@ -298,7 +187,7 @@
         const data = imgData.data;
 
         let redCountTop = 0;
-        let greenCountBottom = 0;
+        let greenCount = 0;
         const midY = height / 2;
 
         for (let py = 0; py < height; py++) {
@@ -320,26 +209,24 @@
                 case b: h = (r - g) / d + 4; break;
               }
               h /= 6;
-            } else {
-              h = 0;
-            }
+            } else { h = 0; }
 
             const hueDeg = h * 360;
 
-            // Rot-Filter (oben)
-            if (py < midY && (hueDeg <= 15 || hueDeg >= 340) && s > 0.35 && v > 0.35) {
+            // Rot-Filter: Nur in der oberen Hälfte der Bounding-Box zulassen
+            if (py < midY && (hueDeg <= 12 || hueDeg >= 345) && s > 0.45 && v > 0.4) {
               redCountTop++;
             }
-            // Grün/Cyan-Filter (unten)
-            if (py >= midY && (hueDeg >= 115 && hueDeg <= 175) && s > 0.25 && v > 0.35) {
-              greenCountBottom++;
+            // Grün-Filter: Breiterer Hue-Bereich (100° bis 185°) + niedrigere Sättigung für helles LED-Grün
+            if ((hueDeg >= 100 && hueDeg <= 185) && s > 0.15 && v > 0.35) {
+              greenCount++;
             }
           }
         }
 
         const totalPixels = width * height;
+        if (greenCount / totalPixels > 0.008) return 'GRUEN';
         if (redCountTop / totalPixels > 0.015) return 'ROT';
-        if (greenCountBottom / totalPixels > 0.015) return 'GRUEN';
       } catch (e) {
         console.warn("Canvas ImageData konnte nicht ausgelesen werden:", e);
       }
@@ -347,7 +234,6 @@
       return 'NONE';
     }
 
-    // Flüssige Live-Erkennungs-Schleife
     async function detectLoop() {
       if (isTestMode) return;
 
@@ -365,20 +251,20 @@
 
       const now = Date.now();
 
-      // KI-Analyse gedrosselt ausführen (alle 200 ms)
       if (model && !isProcessingFrame && (now - lastDetectionTime > DETECTION_INTERVAL_MS)) {
         isProcessingFrame = true;
         lastDetectionTime = now;
 
         try {
-          const predictions = await model.detect(canvas, 10, 0.15);
+          const predictions = await model.detect(canvas, 10, 0.12);
           let frameState = 'NONE';
 
           predictions.forEach(pred => {
             const [x, y, w, h] = pred.bbox;
             const aspectRatio = h / w;
 
-            if ((pred.class === 'traffic light' || pred.class === 'person') && aspectRatio > 1.1) {
+            // Ignoriere flache Boxen in Straßenhöhe (Autos)
+            if (y < canvas.height * 0.7 && aspectRatio > 0.8) {
               const rx = Math.max(0, Math.floor(x));
               const ry = Math.max(0, Math.floor(y));
               const rw = Math.min(canvas.width - rx, Math.floor(w));
@@ -395,9 +281,9 @@
             }
           });
 
-          // Fallback-Scan auf dem gesamten Canvas bei kleinen Ampeln
+          // Fallback: Scan der oberen/mittleren Bildbereiche
           if (frameState === 'NONE') {
-            frameState = analyzeTrafficLightHSV(0, 0, canvas.width, canvas.height);
+            frameState = analyzeTrafficLightHSV(0, 0, canvas.width, Math.floor(canvas.height * 0.85));
           }
 
           frameHistory.push(frameState);
@@ -406,8 +292,8 @@
           const rotVotes = frameHistory.filter(s => s === 'ROT').length;
           const gruenVotes = frameHistory.filter(s => s === 'GRUEN').length;
 
-          if (rotVotes >= 4) announceState('ROT');
-          else if (gruenVotes >= 4) announceState('GRUEN');
+          if (gruenVotes >= 3) announceState('GRUEN');
+          else if (rotVotes >= 4) announceState('ROT');
           else if (frameHistory.every(s => s === 'NONE')) announceState('NONE');
 
         } catch (err) {
@@ -420,7 +306,6 @@
       requestAnimationFrame(detectLoop);
     }
 
-    // Datei-Upload & Asynchroner Test-Runner (CORS Taint Fix)
     fileInput.addEventListener('change', (e) => {
       const files = e.target.files;
       if (!files || !files.length) return;
@@ -447,7 +332,7 @@
 
           if (model) {
             try {
-              const predictions = await model.detect(canvas, 10, 0.15);
+              const predictions = await model.detect(canvas, 10, 0.12);
               let detectedState = 'NONE';
 
               predictions.forEach(pred => {
@@ -484,7 +369,6 @@
       reader.readAsDataURL(file);
     });
 
-    // Start-Up
     window.addEventListener('load', async () => {
       try {
         model = await cocoSsd.load();
