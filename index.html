@@ -96,15 +96,15 @@
       return [h * 360, s * 100, v * 100];
     }
 
-    // 2. HSV-Analyse (Optimiert für kleine Signale auf Distanz)
+    // 2. HSV-Analyse mit Dichte-Filter (Clustering)
     function detectGreenLightRegion(ctx, width, height) {
       const imgData = ctx.getImageData(0, 0, width, height);
       const data = imgData.data;
 
-      let minX = width, maxX = 0, minY = height, maxY = 0;
-      let greenPixelCount = 0;
+      // 2D-Maske für grüne Pixel erstellen
+      const mask = new Array(height).fill(0).map(() => new Uint8Array(width));
+      let rawCount = 0;
 
-      // step = 1: Jedes Pixel prüfen, um auch entfernte Mini-Ampeln zu erwischen
       for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
           const i = (y * width + x) * 4;
@@ -114,25 +114,51 @@
 
           const [h, s, v] = rgbToHsv(r, g, b);
 
-          // Erweiterter Grün-Filter:
-          // Hue: 115° bis 170° (deckt auch gelblicheres/bläulicheres Grün ab)
-          // Sättigung: > 35%, Helligkeit: > 45%
+          // Grün-Filter für Signal-LEDs
           if (h >= 115 && h <= 170 && s >= 35 && v >= 45) {
-            greenPixelCount++;
-            if (x < minX) minX = x;
-            if (x > maxX) maxX = x;
-            if (y < minY) minY = y;
-            if (y > maxY) maxY = y;
+            mask[y][x] = 1;
+            rawCount++;
           }
         }
       }
 
-      // Schwelle auf 5 Pixel gesenkt für Distanzaufnahmen
-      const hasGreenLight = greenPixelCount >= 5;
+      if (rawCount < 4) {
+        return { found: false, pixelCount: 0, boundingBox: null };
+      }
+
+      // Dichte-Prüfung: Nur Pixel werten, die grüne Nachbarn im Umkreis haben (Filtert Baumlaub)
+      let minX = width, maxX = 0, minY = height, maxY = 0;
+      let densePixelCount = 0;
+      const radius = 2; // Suchradius in Pixeln
+
+      for (let y = radius; y < height - radius; y++) {
+        for (let x = radius; x < width - radius; x++) {
+          if (mask[y][x] === 1) {
+            let neighbors = 0;
+
+            for (let ny = -radius; ny <= radius; ny++) {
+              for (let nx = -radius; nx <= radius; nx++) {
+                if (mask[y + ny][x + nx] === 1) neighbors++;
+              }
+            }
+
+            // Wenn mindestens 4 grüne Pixel im 5x5 Umfeld liegen -> Signal-Cluster
+            if (neighbors >= 4) {
+              densePixelCount++;
+              if (x < minX) minX = x;
+              if (x > maxX) maxX = x;
+              if (y < minY) minY = y;
+              if (y > maxY) maxY = y;
+            }
+          }
+        }
+      }
+
+      const hasGreenLight = densePixelCount >= 4;
 
       return {
         found: hasGreenLight,
-        pixelCount: greenPixelCount,
+        pixelCount: densePixelCount,
         boundingBox: hasGreenLight ? {
           x: minX,
           y: minY,
@@ -142,7 +168,32 @@
       };
     }
 
-    // 3. Auswertung und Zeichnen
+    // 3. Schritt 2: Ausschnitt (ROI) für das KI-Modell zuschneiden
+    function getCroppedCanvas(sourceCanvas, box, paddingPercent = 0.5) {
+      const padX = Math.round(box.width * paddingPercent);
+      const padY = Math.round(box.height * paddingPercent);
+
+      const cropX = Math.max(0, box.x - padX);
+      const cropY = Math.max(0, box.y - padY);
+      const cropW = Math.min(sourceCanvas.width - cropX, box.width + padX * 2);
+      const cropH = Math.min(sourceCanvas.height - cropY, box.height + padY * 2);
+
+      const cropCanvas = document.createElement('canvas');
+      cropCanvas.width = cropW;
+      cropCanvas.height = cropH;
+      const cropCtx = cropCanvas.getContext('2d');
+
+      cropCtx.drawImage(
+        sourceCanvas,
+        cropX, cropY, cropW, cropH,
+        0, 0, cropW, cropH
+      );
+
+      // cropCanvas kann direkt an das Modell übergeben werden (z. B. model.predict(cropCanvas))
+      return cropCanvas;
+    }
+
+    // 4. Auswertung und Zeichnen
     function processFrame() {
       const result = detectGreenLightRegion(ctx, canvas.width, canvas.height);
 
@@ -151,23 +202,22 @@
         statusDiv.style.borderColor = "#28a745";
         
         const box = result.boundingBox;
+
+        // ROI für Modell-Klassifizierung vorbereiten
+        const croppedRoiCanvas = getCroppedCanvas(canvas, box, 0.4);
+        // Hier Modell-Aufruf einbauen: analyzeWithModel(croppedRoiCanvas);
+
+        // Visuelle Markierung auf dem Canvas zeichnen
         ctx.strokeStyle = '#00FF00';
-        ctx.lineWidth = 4;
-        // Bounding Box mit etwas Padding zeichnen
-        const padding = 10;
-        ctx.strokeRect(
-          Math.max(0, box.x - padding), 
-          Math.max(0, box.y - padding), 
-          box.width + (padding * 2), 
-          box.height + (padding * 2)
-        );
+        ctx.lineWidth = 3;
+        ctx.strokeRect(box.x, box.y, Math.max(box.width, 4), Math.max(box.height, 4));
       } else {
         statusDiv.innerText = "Kein grünes Signal erkannt.";
         statusDiv.style.borderColor = "#dc3545";
       }
     }
 
-    // 4. Kamera-Stream
+    // 5. Kamera-Stream
     async function startCamera() {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
@@ -194,7 +244,7 @@
       requestAnimationFrame(renderLoop);
     }
 
-    // 5. Datei-Upload (Skaliert übergroße Bilder herunter)
+    // 6. Datei-Upload
     imageLoader.addEventListener('change', function(e) {
       const file = e.target.files[0];
       if (!file) return;
@@ -205,7 +255,6 @@
         img.onload = function() {
           isStaticImage = true;
           
-          // Max-Breite auf 800px begrenzen, damit Distanz-Signale nicht in Megapixeln untergehen
           const maxDim = 800;
           let w = img.width;
           let h = img.height;
