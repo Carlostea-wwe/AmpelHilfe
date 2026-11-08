@@ -3,9 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Ampel-Erkennung (TensorFlow.js)</title>
+  <title>Ampel-Erkennung</title>
   
-  <!-- TensorFlow.js und COCO-SSD Modell aus CDN laden -->
+  <!-- TensorFlow.js und COCO-SSD Modell aus CDN -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
 
@@ -61,7 +61,7 @@
 </head>
 <body>
 
-  <div id="status">Lade KI-Modell... Bitte warten.</div>
+  <div id="status">Bereit. Lade KI im Hintergrund...</div>
   
   <div class="canvas-container">
     <canvas id="outputCanvas"></canvas>
@@ -80,19 +80,21 @@
     const video = document.getElementById('webcam');
 
     let model = null;
+    let isModelLoading = true;
+    let isProcessing = false;
     let isStaticImage = false;
 
-    // 1. KI-Modell laden
-    async function initModel() {
-      try {
-        model = await cocoSsd.load();
-        statusDiv.innerText = "Modell bereit. Starte Kamera...";
-        startCamera();
-      } catch (err) {
-        statusDiv.innerText = "Fehler beim Laden des KI-Modells.";
-        console.error(err);
-      }
-    }
+    // 1. KI-Modell im Hintergrund laden (ohne UI zu blockieren)
+    cocoSsd.load().then(loadedModel => {
+      model = loadedModel;
+      isModelLoading = false;
+      statusDiv.innerText = "KI-Modell bereit!";
+      statusDiv.style.borderColor = "#28a745";
+    }).catch(err => {
+      isModelLoading = false;
+      statusDiv.innerText = "KI-Modell konnte nicht geladen werden.";
+      console.error(err);
+    });
 
     // 2. RGB zu HSV Konvertierung
     function rgbToHsv(r, g, b) {
@@ -114,6 +116,149 @@
       return [h * 360, s * 100, v * 100];
     }
 
-    // 3. Stufe 2: Farbanalyse NUR im Bereich der Bounding-Box des KI-Gehäuses
-    function analyzeTraffic
-      
+    // 3. Farbanalyse innerhalb der KI Bounding Box
+    function analyzeTrafficLightColor(ctx, bbox) {
+      const [x, y, w, h] = bbox;
+      const imgData = ctx.getImageData(Math.max(0, Math.round(x)), Math.max(0, Math.round(y)), Math.max(1, Math.round(w)), Math.max(1, Math.round(h)));
+      const data = imgData.data;
+
+      let greenCount = 0;
+      let redCount = 0;
+
+      for (let i = 0; i < data.length; i += 4) {
+        const r = data[i];
+        const g = data[i + 1];
+        const b = data[i + 2];
+
+        const [hue, sat, val] = rgbToHsv(r, g, b);
+
+        if (hue >= 120 && hue <= 175 && sat >= 35 && val >= 45) greenCount++;
+        if ((hue <= 12 || hue >= 340) && sat >= 45 && val >= 45) redCount++;
+      }
+
+      if (greenCount > redCount && greenCount > 2) return 'green';
+      if (redCount > greenCount && redCount > 2) return 'red';
+      return 'unknown';
+    }
+
+    // 4. Hauptanalyse
+    async function processFrame() {
+      if (!model || isProcessing) return;
+      isProcessing = true;
+
+      try {
+        const predictions = await model.detect(canvas);
+        const trafficLights = predictions.filter(p => p.class === 'traffic light' && p.score > 0.25);
+
+        if (trafficLights.length > 0) {
+          const bestMatch = trafficLights.reduce((max, p) => p.score > max.score ? p : max, trafficLights[0]);
+          const [x, y, w, h] = bestMatch.bbox;
+
+          const state = analyzeTrafficLightColor(ctx, bestMatch.bbox);
+
+          let statusText = "";
+          let colorCode = "#00FF00";
+
+          if (state === 'green') {
+            statusText = `Grüne Ampel erkannt! (${Math.round(bestMatch.score * 100)}%)`;
+            colorCode = "#00FF00";
+          } else if (state === 'red') {
+            statusText = `Rote Ampel erkannt! (${Math.round(bestMatch.score * 100)}%)`;
+            colorCode = "#FF0000";
+          } else {
+            statusText = `Ampelgehäuse erkannt (${Math.round(bestMatch.score * 100)}%)`;
+            colorCode = "#FFD700";
+          }
+
+          statusDiv.innerText = statusText;
+          statusDiv.style.borderColor = colorCode;
+
+          ctx.strokeStyle = colorCode;
+          ctx.lineWidth = Math.max(3, Math.round(canvas.width / 200));
+          ctx.strokeRect(x, y, w, h);
+        } else {
+          statusDiv.innerText = "Keine Ampel erkannt.";
+          statusDiv.style.borderColor = "#dc3545";
+        }
+      } catch (err) {
+        console.error(err);
+      } finally {
+        isProcessing = false;
+      }
+    }
+
+    // 5. Kamera-Stream starten
+    async function startCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: false
+        });
+        video.srcObject = stream;
+        video.onloadedmetadata = () => {
+          video.play();
+          renderLoop();
+        };
+      } catch (err) {
+        statusDiv.innerText = "Kamera nicht aktiv. Bitte Bild wählen.";
+      }
+    }
+
+    function renderLoop() {
+      if (!isStaticImage && video.readyState === video.HAVE_ENOUGH_DATA) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        
+        if (model && !isProcessing) {
+          processFrame();
+        }
+      }
+      requestAnimationFrame(renderLoop);
+    }
+
+    // 6. Bild-Upload (Funktioniert sofort!)
+    imageLoader.addEventListener('change', function(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function(event) {
+        const img = new Image();
+        img.onload = async function() {
+          isStaticImage = true;
+
+          const maxDim = 800;
+          let w = img.width;
+          let h = img.height;
+
+          if (w > maxDim || h > maxDim) {
+            if (w > h) {
+              h = Math.round((h * maxDim) / w);
+              w = maxDim;
+            } else {
+              w = Math.round((w * maxDim) / h);
+              h = maxDim;
+            }
+          }
+
+          canvas.width = w;
+          canvas.height = h;
+          ctx.drawImage(img, 0, 0, w, h);
+
+          if (isModelLoading) {
+            statusDiv.innerText = "Bild geladen. Warte auf KI-Modell...";
+          } else if (model) {
+            statusDiv.innerText = "Analysiere Bild...";
+            await processFrame();
+          }
+        };
+        img.src = event.target.result;
+      };
+      reader.readAsDataURL(file);
+    });
+
+    startCamera();
+  </script>
+</body>
+</html>
