@@ -289,7 +289,7 @@
       }
     });
 
-    // Robuste HSV-Farbraumanalyse mit Ausnahmeschutz
+    // Robuste HSV-Farbraumanalyse
     function analyzeTrafficLightHSV(x, y, width, height) {
       if (width <= 0 || height <= 0) return 'NONE';
 
@@ -431,7 +431,7 @@
 
       reader.onload = (event) => {
         const img = new Image();
-        img.crossOrigin = "anonymous"; // Tainted-Canvas-Sperre auf Mobilgeräten verhindern
+        img.crossOrigin = "anonymous";
 
         img.onload = async () => {
           canvas.width = img.naturalWidth || img.width;
@@ -443,7 +443,6 @@
           statusCard.textContent = "Analysiere Testbild...";
           statusCard.className = "";
 
-          // Rendern abwarten
           await new Promise(r => setTimeout(r, 100));
 
           if (model) {
@@ -468,7 +467,6 @@
                 }
               });
 
-              // Ganzbild-Fallback für entfernte Signale
               if (detectedState === 'NONE') {
                 detectedState = analyzeTrafficLightHSV(0, 0, canvas.width, canvas.height);
               }
