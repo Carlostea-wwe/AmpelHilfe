@@ -177,7 +177,7 @@
       }
     });
 
-    // Farbanalyse: Streng innerhalb von erkannten Bounding-Boxes
+    // Strikte Farbanalyse NUR in erkannten Bounding Boxes
     function analyzeTrafficLightHSV(x, y, width, height) {
       if (width <= 0 || height <= 0) return 'NONE';
 
@@ -212,11 +212,11 @@
 
             const hueDeg = h * 360;
 
-            // Rot-Filter: Nur in der oberen Hälfte der Box
+            // Rot-Filter: Nur obere Hälfte einer aufrecht stehenden Box
             if (py < midY && (hueDeg <= 12 || hueDeg >= 345) && s > 0.45 && v > 0.4) {
               redCountTop++;
             }
-            // Grün-Filter: Breiter LED-Bereich (100° bis 185°)
+            // Grün-Filter: LED-Cyan/Grün
             if ((hueDeg >= 100 && hueDeg <= 185) && s > 0.15 && v > 0.30) {
               greenCount++;
             }
@@ -224,6 +224,7 @@
         }
 
         const totalPixels = width * height;
+        // Vorrang für Grün
         if (greenCount / totalPixels > 0.005) return 'GRUEN';
         if (redCountTop / totalPixels > 0.015) return 'ROT';
       } catch (e) {
@@ -262,8 +263,8 @@
             const [x, y, w, h] = pred.bbox;
             const aspectRatio = h / w;
 
-            // Filtere flache Boxen auf Fahrbahnhöhe aus (Autos)
-            if (y < canvas.height * 0.60 && aspectRatio > 0.8) {
+            // Ignoriere zu tiefe Objekte (Straßenbereich / Auto-Lichter) & nur hochkantige Boxen
+            if (y < canvas.height * 0.60 && aspectRatio > 0.9) {
               const rx = Math.max(0, Math.floor(x));
               const ry = Math.max(0, Math.floor(y));
               const rw = Math.min(canvas.width - rx, Math.floor(w));
@@ -280,7 +281,6 @@
             }
           });
 
-          // Prioritäts-Regel: GRÜN schlägt ROT
           let finalFrameState = 'NONE';
           if (detectedStates.includes('GRUEN')) finalFrameState = 'GRUEN';
           else if (detectedStates.includes('ROT')) finalFrameState = 'ROT';
@@ -336,8 +336,9 @@
 
               predictions.forEach(pred => {
                 const [x, y, w, h] = pred.bbox;
+                const aspectRatio = h / w;
 
-                if (y < canvas.height * 0.60) {
+                if (y < canvas.height * 0.60 && aspectRatio > 0.9) {
                   const rx = Math.max(0, Math.floor(x));
                   const ry = Math.max(0, Math.floor(y));
                   const rw = Math.min(canvas.width - rx, Math.floor(w));
