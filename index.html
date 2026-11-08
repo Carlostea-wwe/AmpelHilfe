@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Ampel-Erkennung (Auto-HD)</title>
+  <title>Ampel-Erkennung (Flüssiges Auto-HD)</title>
   
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
@@ -95,14 +95,12 @@
   <video id="webcam" autoplay playsinline></video>
   
   <div class="controls">
-    <!-- Schalter für automatischen HD-Foto-Modus -->
     <label class="auto-toggle">
       <input type="checkbox" id="autoSnapToggle" onchange="toggleAutoSnap()">
-      <span>🔄 Auto-HD Modus (alle 1,5s scharfes Sensor-Foto)</span>
+      <span>🔄 Hintergrund-Analyse (alle 1s scharfes Frame)</span>
     </label>
 
-    <!-- Manuelle Buttons -->
-    <button id="snapBtn" class="btn" onclick="takeHighResSnap()">📸 Einzelnes HD-Foto knipsen & analysieren</button>
+    <button id="snapBtn" class="btn" onclick="captureBackgroundFrame()">📸 Einzelbild auswerten</button>
     
     <input type="file" id="imageLoader" accept="image/*" style="display: none;">
     <button class="btn btn-secondary" onclick="document.getElementById('imageLoader').click();">📁 Testbild aus Galerie laden (JPG)</button>
@@ -119,7 +117,6 @@
     let model = null;
     let isProcessing = false;
     let isStaticImage = false;
-    let imageCapture = null;
     let autoSnapInterval = null;
 
     let lastSpokenState = "";
@@ -319,56 +316,33 @@
       ctx.strokeRect(x, y, w, h);
     }
 
-    // HD-Snapshot direkt vom Hardware-Sensor schießen
-    async function takeHighResSnap() {
-      if (!imageCapture || isProcessing) return;
+    // Völlig ruckelfreie Extraktion des aktuellen Frames ohne Kamera-Stopp
+    function captureBackgroundFrame() {
+      if (video.readyState < video.HAVE_ENOUGH_DATA || isProcessing) return;
 
-      try {
-        const blob = await imageCapture.takePhoto();
-        const imgBitmap = await createImageBitmap(blob);
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      canvas.style.height = 'auto';
 
-        const maxDim = 2000;
-        let w = imgBitmap.width;
-        let h = imgBitmap.height;
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-        if (w > maxDim || h > maxDim) {
-          if (w > h) {
-            h = Math.round((h * maxDim) / w);
-            w = maxDim;
-          } else {
-            w = Math.round((w * maxDim) / h);
-            h = maxDim;
-          }
-        }
-
-        canvas.width = w;
-        canvas.height = h;
-        canvas.style.height = 'auto';
-
-        ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = 'high';
-        ctx.drawImage(imgBitmap, 0, 0, w, h);
-
-        await processFrame();
-      } catch (err) {
-        console.error("Auto-Snap Fehler:", err);
-      }
+      processFrame();
     }
 
     function toggleAutoSnap() {
       if (autoSnapToggle.checked) {
-        isStaticImage = true;
-        statusDiv.innerText = "Auto-HD aktiv (schießt alle 1,5s scharfe Fotos)...";
+        statusDiv.innerText = "Hintergrund-Analyse aktiv (ruckelfrei)...";
         
-        takeHighResSnap();
+        captureBackgroundFrame();
         autoSnapInterval = setInterval(() => {
-          takeHighResSnap();
-        }, 1500);
+          captureBackgroundFrame();
+        }, 1000);
 
       } else {
         clearInterval(autoSnapInterval);
-        isStaticImage = false;
-        statusDiv.innerText = "Auto-HD beendet. Standard Live-Stream aktiv.";
+        statusDiv.innerText = "Hintergrund-Analyse beendet. Vorschau aktiv.";
       }
     }
 
@@ -419,23 +393,17 @@
       reader.readAsDataURL(file);
     });
 
-    // Niedrige Auflösung für den Live-Stream (spart Akku & CPU)
+    // Stabile 1080p/720p Auflösung für ununterbrochenen Vorschau-Stream
     if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
       navigator.mediaDevices.getUserMedia({
         video: { 
           facingMode: 'environment', 
-          width: { ideal: 640 }, 
-          height: { ideal: 480 } 
+          width: { ideal: 1920, min: 1280 }, 
+          height: { ideal: 1080, min: 720 } 
         },
         audio: false
       }).then(stream => {
         video.srcObject = stream;
-        
-        const track = stream.getVideoTracks()[0];
-        if ('ImageCapture' in window) {
-          imageCapture = new ImageCapture(track);
-        }
-
         video.onloadedmetadata = () => {
           video.play();
           renderLoop();
@@ -447,14 +415,15 @@
 
     function renderLoop() {
       if (!isStaticImage && video.readyState === video.HAVE_ENOUGH_DATA) {
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = 'high';
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        processFrame();
-        requestAnimationFrame(renderLoop);
+        // Falls Auto-Snap NICHT aktiv ist, wird das Live-Bild flüssig angezeigt
+        if (!autoSnapToggle.checked) {
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          processFrame();
+        }
       }
+      requestAnimationFrame(renderLoop);
     }
   </script>
 </body>
